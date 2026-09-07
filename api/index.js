@@ -13,31 +13,32 @@ connectDB();
 
 const app = express();
 
-// Mobile Flutter clients do not need CORS, but browsers (including Flutter Web)
-// do. Reflect the request origin so development and deployed web clients work
-// with credentialed requests. `*` cannot be used together with credentials.
-const configuredOrigins = (process.env.CLIENT_URL || "")
+// Keep the deployed frontend allowed even when CLIENT_URL only lists localhost.
+// Additional frontend origins can be supplied as a comma-separated list.
+const configuredOrigins = new Set([
+  "https://frontend-elwe.vercel.app",
+  ...(process.env.CLIENT_URL || "")
   .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean),
+]);
 const isLocalDevelopmentOrigin = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
 app.use(
   cors({
     origin(origin, callback) {
-      // Requests from native apps/Postman have no Origin header. When no
-      // CLIENT_URL is configured, allow browser clients from any origin.
+      // Native apps/Postman do not send an Origin header.
       if (
         !origin ||
-        configuredOrigins.length === 0 ||
-        configuredOrigins.includes(origin) ||
+        configuredOrigins.has(origin) ||
         isLocalDevelopmentOrigin(origin)
       ) {
         return callback(null, true);
       }
 
-      return callback(new Error(`CORS origin not allowed: ${origin}`));
+      const error = new Error(`CORS origin not allowed: ${origin}`);
+      return callback(Object.assign(error, { status: 403 }));
     },
     credentials: true,
   })
