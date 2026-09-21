@@ -296,6 +296,15 @@ const getMachines = asyncHandler(async (req, res) => {
 
   const query = { isDeleted: false };
 
+  if (req.query.assetType) {
+    if (!["Machine", "Compressor", "Air Dryer"].includes(req.query.assetType)) {
+      res.status(400);
+      throw new Error("Invalid asset type");
+    }
+    query.assetType = req.query.assetType === "Machine"
+      ? { $in: ["Machine", null] } : req.query.assetType;
+  }
+
   if (status) query.status = status;
   if (company) query.company = company;
   if (section) query.section = section;
@@ -308,6 +317,7 @@ const getMachines = asyncHandler(async (req, res) => {
     query.$or = [
       { machineName: { $regex: search, $options: "i" } },
       { machineNumber: { $regex: search, $options: "i" } },
+      { machineId: { $regex: search, $options: "i" } },
       { machineType: { $regex: search, $options: "i" } },
       { section: { $regex: search, $options: "i" } },
       { shed: { $regex: search, $options: "i" } },
@@ -433,6 +443,16 @@ const updateMachine = asyncHandler(async (req, res) => {
   if (!machine) {
     res.status(404);
     throw new Error("Machine not found");
+  }
+  if (req.user.role === "owner") {
+    if (!req.user.companyName || machine.company !== req.user.companyName ||
+        !["Machine", undefined, null].includes(machine.assetType)) {
+      res.status(403);
+      throw new Error("Owners can only edit machines belonging to their company");
+    }
+    const allowed = ["machineId", "machineName", "machineNumber", "machineType",
+      "modelNumber", "serialNumber", "purchaseDate", "installationDate", "warrantyExpiry", "machineImage"];
+    req.body = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
   }
   const { layout, layoutWidth, layoutLength, machineCount, ...safeUpdates } = req.body;
   if (layout || layoutWidth || layoutLength || machineCount) {

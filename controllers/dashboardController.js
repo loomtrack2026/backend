@@ -282,10 +282,35 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     { loom: 0, compressor: 0, air_dryer: 0, other: 0 }
   );
 
+  // Use active, visible machines when building the web/mobile maintenance schedule.
+  const scheduleMachineIds = await Machine.find(machineQuery).distinct("_id");
+  const scheduledRecords = await Maintenance.find({
+    machine: { $in: scheduleMachineIds }, nextMaintenanceDate: { $ne: null },
+  }).populate("machine", "machineName machineNumber").sort({ maintenanceDate: -1 }).lean();
+  const seenSchedules = new Set();
+  const maintenanceSchedule = [];
+  for (const record of scheduledRecords) {
+    if (!record.machine) continue;
+    const components = record.componentsChecked?.length ? record.componentsChecked : [record.maintenanceType];
+    for (const component of components) {
+      const key = `${record.machine._id}:${record.maintenanceCategory || "General"}:${component}`;
+      if (seenSchedules.has(key)) continue;
+      seenSchedules.add(key);
+      const due = new Date(record.nextMaintenanceDate);
+      maintenanceSchedule.push({
+        _id: `${record._id}:${component}`, machine: record.machine,
+        category: record.maintenanceCategory || "General", component, nextMaintenanceDate: due,
+        scheduleStatus: due < startOfToday ? "Overdue" : due <= addDays(endOfToday, 7) ? "Due Soon" : "Upcoming",
+      });
+    }
+  }
+  maintenanceSchedule.sort((a, b) => a.nextMaintenanceDate - b.nextMaintenanceDate);
+
   res.json({
     success: true,
     data: {
       totalOwners,
+      maintenanceSchedule,
       totalLooms: typeCounts.loom,
       totalMachines,
       totalCompressors: typeCounts.compressor,

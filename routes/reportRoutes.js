@@ -10,5 +10,7 @@ router.use(protect);
 // employees only see their own generated reports.
 const REPORT_ROLES = ["admin", "employee", "general_manager", "owner"];
 router.route("/").get(authorize(...REPORT_ROLES), getReports).post(authorize(...REPORT_ROLES), requestReport);
+router.get("/:id/download", authorize(...REPORT_ROLES), downloadReport);
+router.delete("/:id", authorize(...REPORT_ROLES), deleteReport);
 
 module.exports = router;
