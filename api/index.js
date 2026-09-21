@@ -6,14 +6,12 @@ const cors = require("cors");
 const morgan = require("morgan");
 const cookieParser = require("cookie-parser");
 
-const connectDB = require("../config/db");
+const requireDatabase = require("../middleware/database");
 const { notFound, errorHandler } = require("../middleware/errorHandler");
 const { requireSchedulerKey } = require("../middleware/auth");
 const { runDailyChecks } = require("../utils/scheduler");
 const { startScheduler } = require("../utils/scheduler");
 const { startBackup } = require("../utils/backup");
-
-connectDB();
 
 const app = express();
 
@@ -53,6 +51,15 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
 if (process.env.NODE_ENV !== "production") app.use(morgan("dev"));
 
+// Liveness stays available even when MongoDB is unavailable.
+const healthResponse = (req, res) =>
+  res.json({ success: true, message: "MMS API is running" });
+app.get("/", healthResponse);
+app.get("/api/health", healthResponse);
+
+// Await the connection inside the serverless request lifecycle before queries.
+app.use("/api", requireDatabase);
+
 // Routes
 app.use("/api/auth", require("../routes/authRoutes"));
 app.use("/api/employees", require("../routes/employeeRoutes"));
@@ -79,12 +86,6 @@ app.post("/api/scheduler/run", requireSchedulerKey, async (req, res, next) => {
     next(err);
   }
 });
-
-const healthResponse = (req, res) =>
-  res.json({ success: true, message: "MMS API is running" });
-
-app.get("/", healthResponse);
-app.get("/api/health", healthResponse);
 
 app.use(notFound);
 app.use(errorHandler);

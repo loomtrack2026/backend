@@ -1,21 +1,31 @@
 const mongoose = require("mongoose");
+let connectionPromise;
 
 const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) return true;
+  if (connectionPromise) return connectionPromise;
   if (!process.env.MONGO_URI) {
     console.error("MongoDB connection error: MONGO_URI is not configured");
     return false;
   }
 
+  connectionPromise = (async () => {
+    try {
+      await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 8000,
+        connectTimeoutMS: 8000,
+      });
+      return true;
+    } catch (error) {
+      // Log the error category without exposing connection credentials.
+      console.error(`MongoDB connection failed (${error.name || "Error"})`);
+      return false;
+    }
+  })();
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`MongoDB connected: ${conn.connection.host}`);
-    return true;
-  } catch (error) {
-    console.error(`MongoDB connection error: ${error.message}`);
-    // Do not terminate a Vercel function during module initialization. This
-    // keeps the health endpoint available and records the actual DB error in
-    // Vercel logs, while database-dependent routes continue to fail normally.
-    return false;
+    return await connectionPromise;
+  } finally {
+    connectionPromise = undefined;
   }
 };
 
