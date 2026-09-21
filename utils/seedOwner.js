@@ -13,8 +13,7 @@
  * password is never printed. Existing accounts are left unchanged unless
  * --reset-password is explicitly supplied.
  */
-const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "../api/.env") });
+require("dotenv").config();
 require("../config/mongoDns");
 const mongoose = require("mongoose");
 const User = require("../models/User");

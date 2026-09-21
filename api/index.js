@@ -8,37 +8,40 @@ const cookieParser = require("cookie-parser");
 
 const connectDB = require("../config/db");
 const { notFound, errorHandler } = require("../middleware/errorHandler");
+const { requireSchedulerKey } = require("../middleware/auth");
+const { runDailyChecks } = require("../utils/scheduler");
+const { startScheduler } = require("../utils/scheduler");
+const { startBackup } = require("../utils/backup");
 
 connectDB();
 
 const app = express();
 
-// Keep the deployed frontend allowed even when CLIENT_URL only lists localhost.
-// Additional frontend origins can be supplied as a comma-separated list.
-const configuredOrigins = new Set([
-  "https://frontend-elwe.vercel.app",
-  ...(process.env.CLIENT_URL || "")
+// Mobile Flutter clients do not need CORS, but browsers (including Flutter Web)
+// do. Reflect the request origin so development and deployed web clients work
+// with credentialed requests. `*` cannot be used together with credentials.
+const configuredOrigins = (process.env.CLIENT_URL || "")
   .split(",")
-  .map((origin) => origin.trim().replace(/\/+$/, ""))
-  .filter(Boolean),
-]);
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const isLocalDevelopmentOrigin = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
 app.use(
   cors({
     origin(origin, callback) {
-      // Native apps/Postman do not send an Origin header.
+      // Requests from native apps/Postman have no Origin header. When no
+      // CLIENT_URL is configured, allow browser clients from any origin.
       if (
         !origin ||
-        configuredOrigins.has(origin) ||
+        configuredOrigins.length === 0 ||
+        configuredOrigins.includes(origin) ||
         isLocalDevelopmentOrigin(origin)
       ) {
         return callback(null, true);
       }
 
-      const error = new Error(`CORS origin not allowed: ${origin}`);
-      return callback(Object.assign(error, { status: 403 }));
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
     },
     credentials: true,
   })
@@ -63,6 +66,19 @@ app.use("/api/dashboard", require("../routes/dashboardRoutes"));
 app.use("/api/reports", require("../routes/reportRoutes"));
 app.use("/api/leaves", require("../routes/leaveRoutes"));
 app.use("/api/upload", require("../routes/uploadRoutes"));
+app.use("/api/compressor-maintenance", require("../routes/compressorMaintenanceRoutes"));
+app.use("/api/air-dryer-maintenance", require("../routes/airDryerMaintenanceRoutes"));
+app.use("/api/work-logs", require("../routes/workLogRoutes"));
+
+// One-shot scheduler test endpoint — POST /api/scheduler/run
+app.post("/api/scheduler/run", requireSchedulerKey, async (req, res, next) => {
+  try {
+    const result = await runDailyChecks();
+    res.json({ success: true, message: "Scheduler run completed", ...result });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const healthResponse = (req, res) =>
   res.json({ success: true, message: "MMS API is running" });
@@ -78,6 +94,9 @@ app.use(errorHandler);
 if (require.main === module) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  // In-process daily reminders + backups (local only, never on Vercel).
+  startScheduler();
+  startBackup();
 }
 
 module.exports = app;

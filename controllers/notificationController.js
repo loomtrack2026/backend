@@ -36,6 +36,11 @@ const ingestNotification = asyncHandler(async (req, res) => {
 const getNotifications = asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, unreadOnly } = req.query;
   const query = { "recipients.user": req.user._id };
+  if (req.query.company) {
+    const ids = await Machine.find({ company: req.query.company }).distinct("_id");
+    query.machine = { $in: ids };
+  }
+
   if (unreadOnly === "true") query.isRead = false;
 
   const skip = (Number(page) - 1) * Number(limit);

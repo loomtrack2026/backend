@@ -3,6 +3,8 @@ const OilChange = require("../models/OilChange");
 const Machine = require("../models/Machine");
 const ActivityLog = require("../models/ActivityLog");
 const Employee = require("../models/Employee");
+const Notification = require("../models/Notification");
+const User = require("../models/User");
 
 const getEmployee = (userId) => Employee.findOne({ user: userId, isActive: true });
 
@@ -140,12 +142,19 @@ const updateOilChange = asyncHandler(async (req, res) => {
 
 // @desc    Delete an oil change record
 // @route   DELETE /api/oil-changes/:id
-// @access  Owner
+// @access  Owner, General Manager, own records by Employee
 const deleteOilChange = asyncHandler(async (req, res) => {
   const record = await OilChange.findById(req.params.id);
   if (!record) {
     res.status(404);
     throw new Error("Oil change record not found");
+  }
+  if (req.user.role === "employee") {
+    const employee = await getEmployee(req.user._id);
+    if (String(record.changedBy) !== String(employee?._id)) {
+      res.status(403);
+      throw new Error("You can only delete your own oil-change records");
+    }
   }
   await record.deleteOne();
   res.json({ success: true, message: "Oil change record deleted" });
@@ -172,6 +181,118 @@ const getDueOilChanges = asyncHandler(async (req, res) => {
   res.json({ success: true, data: due });
 });
 
+// Create one in-app notification per due oil change (deduplicated by sourceId)
+// so employees and the owner always see the reminder regardless of whether
+// the external scheduler is running. The scheduler's own reminderSent flag is
+// left untouched so SMS/WhatsApp/Email dispatch still happens normally.
+const ensureOilChangeReminderNotifications = async (dueItems) => {
+  if (!dueItems.length) return;
+  const owners = await User.find({ role: "owner", isActive: true }).select("_id");
+  const ownerIds = owners.map((o) => o._id);
+
+  for (const item of dueItems) {
+    const exists = await Notification.exists({
+      type: "Oil Change Reminder",
+      sourceCollection: "OilChange",
+      sourceId: item.recordId,
+    });
+    if (exists) continue;
+
+    const employees = await Employee.find({
+      assignedMachines: item.machineId,
+      isActive: true,
+    }).select("user name");
+    const recipients = [];
+    for (const emp of employees) {
+      if (emp.user) recipients.push({ user: emp.user, channel: "push" });
+    }
+    for (const ownerId of ownerIds) {
+      recipients.push({ user: ownerId, channel: "push" });
+    }
+
+    await Notification.create({
+      type: "Oil Change Reminder",
+      title: `Oil Change Due - ${item.machineName}`,
+      message: `Machine: ${item.machineName} (${item.machineNumber})\nOil change is due. Please replace the oil and log it in the system.`,
+      machine: item.machineId,
+      recipients,
+      sourceCollection: "OilChange",
+      sourceId: item.recordId,
+    });
+  }
+};
+
+// @desc    Oil change due status for the latest record per machine. Also
+//          ensures in-app 'Oil Change Reminder' notifications are created.
+// @route   GET /api/oil-changes/due-status
+// @access  Owner, General Manager, Employee (assigned machines only)
+const getOilChangeDueStatus = asyncHandler(async (req, res) => {
+  const now = new Date();
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+
+  const latest = await OilChange.aggregate([
+    { $sort: { oilChangeDate: -1 } },
+    {
+      $group: {
+        _id: "$machine",
+        recordId: { $first: "$_id" },
+        oilChangeDate: { $first: "$oilChangeDate" },
+        nextOilChangeDate: { $first: "$nextOilChangeDate" },
+      },
+    },
+  ]);
+
+  const machineIds = latest.filter((l) => l._id).map((l) => l._id);
+  const machines = await Machine.find({ _id: { $in: machineIds }, isDeleted: false }).select(
+    "machineName machineNumber machineCategory"
+  );
+  const machineById = new Map(machines.map((m) => [String(m._id), m]));
+
+  let items = latest
+    .filter((l) => l._id && machineById.has(String(l._id)))
+    .map((l) => {
+      const m = machineById.get(String(l._id));
+      const next = l.nextOilChangeDate ? new Date(l.nextOilChangeDate) : null;
+      const due = next ? next <= endOfToday : false;
+      const daysUntil = next ? Math.ceil((next - now) / 86400000) : null;
+      return {
+        machine: {
+          _id: m._id,
+          machineName: m.machineName,
+          machineNumber: m.machineNumber,
+          machineCategory: m.machineCategory,
+        },
+        oilChangeDate: l.oilChangeDate,
+        nextOilChangeDate: l.nextOilChangeDate,
+        due,
+        daysUntil,
+        recordId: l.recordId,
+        machineId: l._id,
+      };
+    });
+
+  if (req.user.role === "employee") {
+    const employee = await getEmployee(req.user._id);
+    const assigned = new Set((employee?.assignedMachines || []).map((id) => String(id)));
+    items = items.filter((i) => assigned.has(String(i.machineId)));
+  }
+
+  const dueItems = items.filter((i) => i.due);
+  try {
+    await ensureOilChangeReminderNotifications(dueItems);
+  } catch (err) {
+    console.error("Failed to ensure oil change reminders:", err.message);
+  }
+
+  res.json({
+    success: true,
+    data: items.sort(
+      (a, b) => Number(b.due) - Number(a.due) || (a.daysUntil ?? 1e9) - (b.daysUntil ?? 1e9)
+    ),
+  });
+});
+
 // @desc    Mark a record's reminder as sent (called by scheduler after it
 //          successfully dispatches SMS/WhatsApp/Email).
 // @route   PATCH /api/oil-changes/:id/mark-reminder-sent
@@ -195,5 +316,6 @@ module.exports = {
   updateOilChange,
   deleteOilChange,
   getDueOilChanges,
+  getOilChangeDueStatus,
   markReminderSent,
 };

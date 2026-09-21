@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize, requireSchedulerKey } = require("../middleware/auth");
+const { protect, requireSchedulerKey } = require("../middleware/auth");
 const {
   createOilChange,
   getOilChanges,
@@ -8,6 +8,7 @@ const {
   updateOilChange,
   deleteOilChange,
   getDueOilChanges,
+  getOilChangeDueStatus,
   markReminderSent,
 } = require("../controllers/oilChangeController");
 
@@ -18,12 +19,14 @@ router.patch("/:id/mark-reminder-sent", requireSchedulerKey, markReminderSent);
 // Normal user-facing endpoints
 router.use(protect);
 
+router.get("/due-status", getOilChangeDueStatus);
+
 router.route("/").get(getOilChanges).post(createOilChange);
 
 router
   .route("/:id")
   .get(getOilChangeById)
   .put(updateOilChange)
-  .delete(authorize("owner"), deleteOilChange);
+  .delete(deleteOilChange);
 
 module.exports = router;

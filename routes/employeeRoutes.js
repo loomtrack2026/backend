@@ -9,13 +9,19 @@ const {
   deleteEmployee,
 } = require("../controllers/employeeController");
 
-router.use(protect, authorize("general_manager"));
+// Employees: Admin = full control, Owner = read-only view,
+// General Manager = create/edit own team, Employee = no access here.
+router.use(protect);
 
-router.route("/").get(getEmployees).post(createEmployee);
+router
+  .route("/")
+  .get(authorize("admin", "owner", "general_manager"), getEmployees)
+  .post(authorize("admin", "general_manager"), createEmployee);
+
 router
   .route("/:id")
-  .get(getEmployeeById)
-  .put(authorize("general_manager"), updateEmployee)
-  .delete(authorize("general_manager"), deleteEmployee);
+  .get(authorize("admin", "owner", "general_manager"), getEmployeeById)
+  .put(authorize("admin", "general_manager"), updateEmployee)
+  .delete(authorize("admin"), deleteEmployee);
 
 module.exports = router;

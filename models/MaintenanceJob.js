@@ -4,11 +4,18 @@ const spareUsedSchema = new mongoose.Schema(
   {
     spareName:   { type: String, required: true, trim: true },
     spareNumber: { type: String, trim: true },
-    quantity:    { type: Number, default: 1 },
+    quantity:    { type: Number, default: 1, min: 1 },
+    price:       { type: Number, default: 0, min: 0 },
+    totalCost:   { type: Number, default: 0, min: 0 },
     photoUrl:    { type: String, trim: true },
   },
   { _id: false }
 );
+
+spareUsedSchema.pre("validate", function (next) {
+  this.totalCost = Number(this.quantity || 0) * Number(this.price || 0);
+  next();
+});
 
 const maintenanceJobSchema = new mongoose.Schema(
   {

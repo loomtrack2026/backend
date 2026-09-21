@@ -11,6 +11,8 @@ const notificationSchema = new mongoose.Schema(
         "Spare Replacement Reminder",
         "Machine Breakdown",
         "Employee Update",
+        "Compressor Maintenance",
+        "Air Dryer Maintenance",
       ],
       required: true,
     },

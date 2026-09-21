@@ -153,6 +153,10 @@ const getReports = asyncHandler(async (req, res) => {
     : req.user.role === "admin"
       ? {}
       : { submittedTo: req.user.role };
+  if (req.query.company) {
+    const ids = await Machine.find({ company: req.query.company }).distinct("_id");
+    query.machine = { $in: ids };
+  }
   const reports = await Report.find(query)
     .populate("machine", "machineName machineNumber company")
     .populate("generatedBy", "name email")

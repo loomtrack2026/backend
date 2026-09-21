@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Employee = require("../models/Employee");
 const User = require("../models/User");
 const Machine = require("../models/Machine");
+const { logActivity } = require("../utils/audit");
 
 const employeeScope = (req) =>
   req.user.role === "general_manager" ? { manager: req.user._id } : {};
@@ -88,6 +89,7 @@ const createEmployee = asyncHandler(async (req, res) => {
   }
 
   res.status(201).json({ success: true, data: employee });
+  logActivity(req, "CREATE_EMPLOYEE", "Employee", employee._id, { name, employeeId });
 });
 
 // @desc    List employees
@@ -97,6 +99,11 @@ const getEmployees = asyncHandler(async (req, res) => {
   const { search, department, page = 1, limit = 20 } = req.query;
   const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 500);
   const query = { isActive: true, ...employeeScope(req) };
+  if (req.query.company) {
+    const ids = await Machine.find({ company: req.query.company }).distinct("_id");
+    query.assignedMachines = { $in: ids };
+  }
+
 
   if (department) query.department = department;
   if (search) {
@@ -237,6 +244,7 @@ const updateEmployee = asyncHandler(async (req, res) => {
     await employee.save();
   }
   res.json({ success: true, data: employee });
+  logActivity(req, "UPDATE_EMPLOYEE", "Employee", employee._id, { name, employeeId });
 });
 
 // @desc    Deactivate (soft-delete) employee
@@ -254,6 +262,7 @@ const deleteEmployee = asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(employee.user, { isActive: false });
   }
   res.json({ success: true, message: "Employee deactivated" });
+  logActivity(req, "DEACTIVATE_EMPLOYEE", "Employee", employee._id, { name, employeeId });
 });
 
 module.exports = {

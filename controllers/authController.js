@@ -136,15 +136,23 @@ const deleteOwner = asyncHandler(async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const login = asyncHandler(async (req, res) => {
-  const email = req.body.email?.trim().toLowerCase();
+  const identifier = req.body.identifier?.trim();
   const { password } = req.body;
 
-  const user = email && password
-    ? await User.findOne({ email }).select("+password")
-    : null;
+  let user = null;
+  if (identifier && password) {
+    const employee = await Employee.findOne({ employeeId: identifier }).select("user");
+    const identifiers = [
+      { email: identifier.toLowerCase() },
+      { phoneNumber: identifier },
+      ...(mongoose.isValidObjectId(identifier) ? [{ _id: identifier }] : []),
+      ...(employee?.user ? [{ _id: employee.user }] : []),
+    ];
+    user = await User.findOne({ $or: identifiers }).select("+password");
+  }
   if (!user || !(await user.comparePassword(password))) {
     res.status(401);
-    throw new Error("Invalid email or password");
+    throw new Error("Invalid email or phone number, or password");
   }
   if (!user.isActive) {
     res.status(403);
@@ -179,8 +187,13 @@ const getMe = asyncHandler(async (req, res) => {
 
 // @desc    Change password (while logged in)
 // @route   PUT /api/auth/change-password
-// @access  Private
+// @access  Private (managers only — employees get their password reset by a manager)
 const changePassword = asyncHandler(async (req, res) => {
+  if (req.user.role === "employee") {
+    res.status(403);
+    throw new Error("Employees cannot change their password. Please ask your manager.");
+  }
+
   const { currentPassword, newPassword } = req.body;
   const user = await User.findById(req.user._id).select("+password");
 
