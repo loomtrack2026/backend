@@ -43,26 +43,32 @@ test('report routes download PDFs and enforce employee record ownership', async 
   assert.equal(removed, true);
 });
 
-test('owner machine edits cannot change another company or protected fields', async (t) => {
+test('only admins can edit machines, including machines in an owner company', async (t) => {
   const { updateMachine } = require('../controllers/machineController');
   let saves = 0;
-  const machine = { _id:'machine', company:'Mill A', assetType:'Machine', machineName:'Old',
+  let lookups = 0;
+  const machine = { _id: 'machine', company: 'Mill A', machineName: 'Old',
     save: async () => { saves++; } };
-  t.mock.method(Machine, 'findOne', async () => machine);
+  t.mock.method(Machine, 'findOne', async () => { lookups++; return machine; });
   t.mock.method(ActivityLog, 'create', async () => {});
-  const res = { code:200, status(code) { this.code = code; return this; }, json(data) { this.body = data; } };
-  let error;
-  await updateMachine({ params:{id:'machine'}, user:{role:'owner',companyName:'Mill B'}, body:{machineName:'Wrong'} }, res, (e) => { error = e; });
-  assert.equal(res.code, 403);
-  assert.match(error.message, /their company/);
+  for (const role of ['owner', 'general_manager', 'employee']) {
+    const res = { code: 200, status(code) { this.code = code; return this; } };
+    let error;
+    await updateMachine({ params: { id: 'machine' },
+      user: { role, companyName: 'Mill A' }, body: { machineName: 'Changed' } },
+      res, (e) => { error = e; });
+    assert.equal(res.code, 403);
+    assert.match(error.message, /Only admin/);
+  }
+  assert.equal(lookups, 0);
   assert.equal(saves, 0);
-  await updateMachine({ params:{id:'machine'}, user:{role:'owner',companyName:'Mill A'},
-    body:{machineName:'Updated',company:'Mill B',isDeleted:true,assignedEmployees:['other']} }, res, (e) => { throw e; });
+  assert.equal(machine.machineName, 'Old');
+  const res = { json(data) { this.body = data; } };
+  await updateMachine({ params: { id: 'machine' }, user: { role: 'admin' },
+    body: { machineName: 'Updated' } }, res, (e) => { throw e; });
   assert.equal(saves, 1);
   assert.equal(machine.machineName, 'Updated');
-  assert.equal(machine.company, 'Mill A');
-  assert.equal(machine.isDeleted, undefined);
-  assert.equal(machine.assignedEmployees, undefined);
+  assert.equal(res.body.success, true);
 });
 
 test('machine lists apply assetType and search by equipment ID', async (t) => {

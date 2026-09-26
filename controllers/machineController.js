@@ -437,22 +437,16 @@ const getMachineById = asyncHandler(async (req, res) => {
 
 // @desc    Update a machine
 // @route   PUT /api/machines/:id
-// @access  Owner
+// @access  Admin
 const updateMachine = asyncHandler(async (req, res) => {
+  if (req.user.role !== "admin") {
+    res.status(403);
+    throw new Error("Only admin can edit machines");
+  }
   const machine = await Machine.findOne({ _id: req.params.id, isDeleted: false });
   if (!machine) {
     res.status(404);
     throw new Error("Machine not found");
-  }
-  if (req.user.role === "owner") {
-    if (!req.user.companyName || machine.company !== req.user.companyName ||
-        !["Machine", undefined, null].includes(machine.assetType)) {
-      res.status(403);
-      throw new Error("Owners can only edit machines belonging to their company");
-    }
-    const allowed = ["machineId", "machineName", "machineNumber", "machineType",
-      "modelNumber", "serialNumber", "purchaseDate", "installationDate", "warrantyExpiry", "machineImage"];
-    req.body = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
   }
   const { layout, layoutWidth, layoutLength, machineCount, ...safeUpdates } = req.body;
   if (layout || layoutWidth || layoutLength || machineCount) {
